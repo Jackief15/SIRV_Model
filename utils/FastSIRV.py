@@ -21,9 +21,9 @@ import math
 import networkx as nx
 import time
 import matplotlib.pyplot as plt
-from DiffusionTrend import DiffusionTrend
+from utils.DiffusionTrend import DiffusionTrend
 
-from DiffusionModel import DiffusionModel
+from utils.DiffusionModel import DiffusionModel
 
 
 # ----------------------------------------------------------------------

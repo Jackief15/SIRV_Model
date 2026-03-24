@@ -7,8 +7,9 @@ import pandas as pd
 import networkx as nx
 from joblib import Parallel, delayed
 
-from FastSIRV import FastSIRV
-from Gloabl_stage import GlobalStage
+from utils.FastSIRV import FastSIRV
+# from utils.Gloabl_stage import GlobalStage
+from utils.newGlobalStage import GlobalStage
 
 
 # key: (M, N) → (indptr, indices)

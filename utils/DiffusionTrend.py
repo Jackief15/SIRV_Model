@@ -1,4 +1,4 @@
-from DiffusionViz import DiffusionPlot
+from utils.DiffusionViz import DiffusionPlot
 import numpy as np
 
 __author__ = "Giulio Rossetti"

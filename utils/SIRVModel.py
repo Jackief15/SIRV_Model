@@ -1,7 +1,7 @@
 import future.utils
 import numpy as np
 
-from DiffusionModel import DiffusionModel
+from utils.DiffusionModel import DiffusionModel
 
 __author__ = "Giulio Rossetti"
 __license__ = "BSD-2-Clause"
