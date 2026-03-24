@@ -1,0 +1,11 @@
+bokeh==3.3.4
+future==0.18.3
+joblib==1.2.0
+matplotlib==3.8.0
+netdispatch==0.1.0
+networkx==3.1
+numba==0.59.0
+numpy==2.4.3
+pandas==3.0.1
+six==1.16.0
+tqdm==4.65.0
