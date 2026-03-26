@@ -41,7 +41,7 @@ def _process_one(
             sirv,
             C=C, eta=eta, beta=beta, gamma=gamma,
             theta=theta,                     # ← 可變參數
-            alpha=10,                       # Robustness check
+            alpha=0,                       # Robustness check
             epsilon=epsilon,
             Dr=Dr, Dg=Dg,
             x0=x0, n0=n0,
