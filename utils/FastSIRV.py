@@ -1,16 +1,5 @@
 """
 Fast SIRV model on a 2-D grid (or any undirected graph in CSR form).
-
-核心特色
---------
-1. 以 4 個 bool 向量 (S, I, R, V) 表節點狀態；記憶體極小。
-2. 鄰居掃描改用 CSR adjacency + Numba 向量化 `sirv_step()`。
-3. `run_until_eq()` 自動迭代至無感染者或達 `max_iter`。
-4. 可重複呼叫 `set_initial_status()` 以便在 global stage 中多季重用。
-
-依賴
-----
-pip install numpy scipy numba
 """
 
 from __future__ import annotations
