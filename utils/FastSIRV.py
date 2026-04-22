@@ -15,26 +15,32 @@ from utils.DiffusionTrend import DiffusionTrend
 from utils.DiffusionModel import DiffusionModel
 
 
-# ----------------------------------------------------------------------
-# 1. 核心：單步狀態更新（Numba JIT）
-# ----------------------------------------------------------------------
+# 1. One-step update
 @nb.njit(parallel=True, fastmath=True)
 def sirv_step(S, I, R, V, indptr, indices, beta, eta, gamma):
     """
+    Perform a single time-step update using Numba acceleration.
+
     Parameters
     ----------
     S, I, R, V : 1-D bool ndarray
-    indptr, indices : CSR 鄰接矩陣兩個欄位
+        Boolean arrays representing node statuses.
+    indptr, indices : 1-D int ndarray
+        Two fields of the Compressed Sparse Row (CSR) adjacency matrix.
     beta, eta, gamma : float
+        Transmission rate, vaccine efficacy, and recovery rate.
+
     Returns
     -------
-    done : bool    # 若已無感染者 ⇒ True
+    is_done : bool
+        Returns True if the infection has cleared (I.sum() == 0).
     """
     n = S.size
-    new_inf = np.zeros(n, np.bool_)             # 疫情擴散暫存
-    p_rec = 1.0 - math.exp(-gamma)               # 只算一次
+    new_inf = np.zeros(n, np.bool_)
+    p_rec = 1.0 - math.exp(-gamma)
     
-    # idx=0→deg=2, etc.
+    # Pre-calculate probabilities for specific degrees (e.g., grid nodes)
+    # Mapping: idx=0 -> deg=2, etc.
     p_edge_S = (
         1.0 - math.exp(-beta / 2),
         1.0 - math.exp(-beta / 3),
@@ -46,12 +52,12 @@ def sirv_step(S, I, R, V, indptr, indices, beta, eta, gamma):
         1.0 - math.exp(-beta * (1.0 - eta) / 4),
     )
 
-    for u in nb.prange(n):                      # C 級多核心並行
+    for u in nb.prange(n):
         if I[u]:
-            deg_u = indptr[u+1] - indptr[u]          # 真實度數
+            deg_u = indptr[u+1] - indptr[u]     # Actual degree of node u
             
-            # 把 ODE 速率換成這個節點對鄰邊的 per‑step 機率
-            # 掃鄰居
+            # Convert ODE rates to per-step edge probabilities
+            # Iterate through neighbors
             for k in range(indptr[u], indptr[u + 1]):
                 v = indices[k]
                 if S[v]:
@@ -60,25 +66,25 @@ def sirv_step(S, I, R, V, indptr, indices, beta, eta, gamma):
                 elif V[v]:
                     if np.random.random() < p_edge_V[deg_u-2]:
                         new_inf[v] = True
-            # 自身康復？
+            
+            # Check for self-recovery
             if np.random.random() < p_rec:
                 I[u] = False
                 R[u] = True
 
-    # 一次性批次更新
+    # Batch update statuses
     S[new_inf] = False
     V[new_inf] = False
     I[new_inf] = True
 
-    return I.sum() == 0                         # 收斂判定
+    return I.sum() == 0                           # Convergence check
 
 
-# ----------------------------------------------------------------------
-# 2. 類別封裝：FastSIRV
-# ----------------------------------------------------------------------
+
+# 2. Class Wrapper: FastSIRV
 class FastSIRV(DiffusionModel):
     """
-    Fast SIRV on a fixed graph (CSR).
+    Fast SIRV implementation on a fixed graph using CSR format.
 
     Parameters
     ----------
@@ -91,7 +97,7 @@ class FastSIRV(DiffusionModel):
         self.indices = indices.astype(np.int32)
         self.nnodes = indptr.size - 1
 
-        # 預先配置狀態向量，後續季節重複利用
+        # Pre-allocate status vectors for reuse across multiple seasons/simulations
         self.S = np.empty(self.nnodes, np.bool_)
         self.I = np.empty(self.nnodes, np.bool_)
         self.R = np.empty(self.nnodes, np.bool_)
@@ -99,9 +105,7 @@ class FastSIRV(DiffusionModel):
         
         self.available_statuses = {"Susceptible": 0, "Vaccinated": 1, "Infected": 2, "Recovered": 3}
 
-    # ------------------------------------------------------------------
-    # 2-1 初始化
-    # ------------------------------------------------------------------
+    # Initialization
     def set_initial_status(
         self,
         frac_infected: float,
@@ -109,12 +113,12 @@ class FastSIRV(DiffusionModel):
         rng: np.random.Generator | None = None,
     ):
         """
-        依給定比例隨機產生初始 S/I/R/V。
+        Randomly initialize S/I/R/V statuses based on given fractions.
 
         Notes
         -----
-        • 不重設 RNG 時，每次呼叫都用全域亂數。
-        • R 在此假設為 0。
+        - Uses the global random generator if 'rng' is not provided.
+        - Initial Recovered (R) count is assumed to be 0.
         """
         if rng is None:
             rng = np.random.default_rng()
@@ -126,7 +130,7 @@ class FastSIRV(DiffusionModel):
 
         # print(self.nnodes, frac_vaccinated)
 
-        # 隨機挑感染者
+        # Randomly select vaccinated nodes (must not overlap with infected)
         n_inf = int(frac_infected * self.nnodes)
         if n_inf > 0:
             idx_inf = rng.choice(self.nnodes, n_inf, replace=False)
@@ -135,19 +139,17 @@ class FastSIRV(DiffusionModel):
         else:
             n_inf = 1
 
-        # 隨機挑接種者（不可重疊感染者）
+        # Randomly select vaccinated nodes (must not overlap with infected)
         susceptible_pool = np.flatnonzero(self.S)
         n_vac_target = int(round(frac_vaccinated * self.nnodes))
-        n_vac = min(n_vac_target, susceptible_pool.size)  # <‑‑ safety cap
+        n_vac = min(n_vac_target, susceptible_pool.size)  # safety cap
         if n_vac > 0:
-            pool = np.flatnonzero(self.S)       # 目前仍為 S
+            pool = np.flatnonzero(self.S)                 # # Nodes still in S status
             idx_vac = rng.choice(pool, n_vac, replace=False)
             self.V[idx_vac] = True
             self.S[idx_vac] = False
 
-    # ------------------------------------------------------------------
-    # 2-2 主迴圈：跑到收斂或達上限
-    # ------------------------------------------------------------------
+    # Main Loop: Run until equilibrium or max iterations
     def run_until_eq(
         self,
         beta: float,
@@ -156,10 +158,14 @@ class FastSIRV(DiffusionModel):
         max_iter: int = 1000,
     ):
         """
+        Run simulation until no infected nodes remain or max_iter is reached.
+
         Returns
         -------
-        counts : tuple[int]  (S, I, R, V 數量)
-        n_iter : int         實際跑了幾步
+        counts : tuple[int]  
+            The final counts of (S, I, R, V).
+        n_iter : int         
+            Actual number of iterations performed.
         """
         for it in range(max_iter):
             done = sirv_step(
@@ -183,12 +189,13 @@ class FastSIRV(DiffusionModel):
             keep_node_status: bool = False,
     ):
         """
-        連續執行直到收斂或達 max_iter，回傳可供 build_trends() 使用的 list。
+        Run until convergence and return a list of records for build_trends().
 
         Parameters
         ----------
         keep_node_status : bool
-            True 時額外儲存 'status' (uint8 向量)，只在回放動畫才開。
+            If True, saves the 'status' (uint8 vector) for each step. 
+            Enable this only for generating playback animations.
         """
         out = []
         last_S = int(self.S.sum())
@@ -225,8 +232,8 @@ class FastSIRV(DiffusionModel):
                 }
             }
 
-            if keep_node_status:               # 只有需要動畫時才開
-                # 將四個布林向量打包成 uint8：0=S,1=V,2=I,3=R
+            if keep_node_status:
+                # Pack boolean vectors into uint8: 0=S, 1=V, 2=I, 3=R
                 record["status"] = (
                     self.S.astype(np.uint8)*0 +
                     self.V.astype(np.uint8)*1 +
@@ -244,33 +251,29 @@ class FastSIRV(DiffusionModel):
 
 
 
-# ----------------------------------------------------------------------
-# 3. 小示範：800×800 方格，跑到均衡
-# ----------------------------------------------------------------------
+
+# 3. Demo: 100x100 Grid run to equilibrium
 if __name__ == "__main__":
     G = nx.grid_2d_graph(m=100, n=100)   
     row, col = zip(*G.edges())
     N = len(G)
-    # csr = csr_matrix(
-    #     (np.ones(len(row) * 2, np.bool_),
-    #      (row + col, col + row)),
-    #     shape=(N, N)
-    # )
+
+    # Convert to CSR format for fast access
     csr = nx.to_scipy_sparse_array(G, dtype=bool, format="csr")
     indptr  = csr.indptr.astype("int32")
     indices = csr.indices.astype("int32")
 
 
-    # 實例化
+    # Instantiate model
     model = FastSIRV(csr.indptr, csr.indices)
 
-    # 參數
+    # Parameters
     # beta, eta, gamma = 0.3, 0.8, 0.1
-    beta = 5/6 # transmission rate
-    gamma = 1/3 # recovery rate
-    eta = 0.5 # vaccine efficacy
-    epsilon = 0.01 # fraction infected
-    x = 0.5 # fraction vaccinated
+    beta = 5/6      # transmission rate
+    gamma = 1/3     # recovery rate
+    eta = 0.5       # vaccine efficacy
+    epsilon = 0.01  # fraction infected
+    x = 0.5         # fraction vaccinated
 
     params = {
         "beta": beta, 
@@ -286,19 +289,21 @@ if __name__ == "__main__":
     counts, n_iter = model.run_until_eq(beta, eta, gamma, max_iter=1000)
     t1 = time.perf_counter()
 
-    print(f"收斂花 {n_iter} 步, 耗時 {t1 - t0:.3f} s")
-    print("最後各狀態數量 (S, I, R, V) =", counts)
+    print(f"Converged in {n_iter} steps, Time taken: {t1 - t0:.3f} s")
+    print("Final status counts (S, I, R, V) =", counts)
 
+    # Re-run to capture iteration data for plotting
     iterations = model.iteration_bunch(
         max_iter=1000,
         progress_bar=False,
         beta=params["beta"],
         eta=params["eta"],
         gamma=params["gamma"],
-        keep_node_status=False    # 只想畫趨勢曲線就設 False
+        keep_node_status=False                # Set to False if only trend curves are needed
     )
 
-    trends = model.build_trends(iterations)   # 舊版 build_trends 不需改
+    # Visualization
+    trends = model.build_trends(iterations)
     DiffusionTrend(model, trends).plot()
     plt.show()
 

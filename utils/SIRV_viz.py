@@ -1,9 +1,3 @@
-# sirv_viz.py
-# -----------------------------------------
-# 依賴：numpy, pandas, matplotlib, networkx
-# 功能：畫左上 100×100 網格的多時點快照
-# -----------------------------------------
-
 from __future__ import annotations
 import numpy as np
 import pandas as pd
@@ -11,18 +5,19 @@ import matplotlib.pyplot as plt
 import networkx as nx
 
 # ─────────────────────────────────────────
-# 基本工具
+# Core Utilities
 # ─────────────────────────────────────────
 def filter_left_top(df: pd.DataFrame, sub_m=100, sub_n=100):
-    """保留左上 sub_m × sub_n 子網格"""
+    """
+    Retains the top-left sub-grid of size sub_m x sub_n from the DataFrame.
+    """
     idx = df.index
     mask = [(r < sub_m and c < sub_n) for r, c in idx]
     return df.loc[mask]
 
 
 # ─────────────────────────────────────────
-# snapshot → DataFrame（支援舊 dict 與新 uint8）
-# ─────────────────────────────────────────
+# Snapshot -> DataFrame (Supports legacy dict and new uint8 formats)# ─────────────────────────────────────────
 def get_status(
     iterations: list[dict],
     *,
@@ -33,9 +28,11 @@ def get_status(
     sub_m: int = 100,
     sub_n: int = 100,
 ) -> pd.DataFrame:
-    """從 iterations 取出第 snap_num 步的節點狀態並轉成 DataFrame"""
+    """
+    Extracts node statuses at a specific snapshot index and converts them to a DataFrame.
+    """
     def _snap_to_dict(snap):
-        # 支援 uint8 或舊 dict
+        # Support for modern uint8 status arrays or legacy dictionary formats
         if isinstance(snap, np.ndarray):
             lin = np.arange(snap.size, dtype=np.int32)
             r, c = divmod(lin, N)
@@ -43,20 +40,21 @@ def get_status(
             return {(int(rr), int(cc)): int(st)
                     for rr, cc, st in zip(r[mask], c[mask], snap[mask])}
         else:
-            return snap                           # 已是 dict
+            return snap
 
-    # ── 1. 初始狀態 ───────────────────────────────────────────
+    # -- 1. Initial State -------------------------------------------
     init_dict = _snap_to_dict(iterations[0]["status"])
-    init_df   = pd.Series(init_dict).to_frame(0)          # col 0
+    init_df   = pd.Series(init_dict).to_frame(0)
 
-    # ── 2. 指定 snapshot 狀態 ────────────────────────────────
+    # -- 2. Target Snapshot State -----------------------------------
     snap_dict = _snap_to_dict(iterations[snap_num]["status"])
     snap_df   = pd.Series(snap_dict).to_frame("Final_Status")
 
-    # ── 3. 合併並裁左上角 ───────────────────────────────────
+    # -- 3. Merge and Crop to Top-Left Corner -----------------------
     status_df = pd.concat([init_df, snap_df], axis=1, sort=False)
     status_df = filter_left_top(status_df, sub_m, sub_n).astype(int)
 
+    # Classification logic for epidemiological groups
     conditions = [
         (status_df[0] == 0) & (status_df["Final_Status"] == 0),
         (status_df[0] == 0) & (status_df["Final_Status"] >= 2),
@@ -70,9 +68,12 @@ def get_status(
 
 
 # ─────────────────────────────────────────
-# DataFrame → networkx 與顏色
+# DataFrame -> NetworkX and Color Mapping
 # ─────────────────────────────────────────
 def get_nw_pos(nodes_data: pd.DataFrame):
+    """
+    Converts status DataFrame to a NetworkX graph with assigned color mappings.
+    """
     G = nx.Graph()
     for pos, row in nodes_data.iterrows():
         G.add_node(pos, pos=pos, group=row["group"])
@@ -91,7 +92,7 @@ def get_nw_pos(nodes_data: pd.DataFrame):
 
 
 # ─────────────────────────────────────────
-# 主繪圖：四張快照並排
+# Main Plotting: Temporal Snapshots Side-by-Side
 # ─────────────────────────────────────────
 def get_nw_graph(
     iterations: list[dict],
@@ -103,6 +104,9 @@ def get_nw_graph(
     sub_m: int = 100,
     sub_n: int = 100,
 ):
+    """
+    Generates a horizontal panel of temporal snapshots illustrating the diffusion process.
+    """
     fig, axes = plt.subplots(
         1, stage_num, figsize=(40, 10), squeeze=False
     )
@@ -145,6 +149,8 @@ def get_nw_graph(
         horizontalalignment="center",
         fontsize=48,
     )
+
+    # Add a progress arrow representing time flow
     plt.annotate(
         "",
         xy=(0.7, 0.12),

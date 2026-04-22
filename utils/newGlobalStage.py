@@ -1,12 +1,11 @@
 import numpy as np
 from typing import Dict, List
+import matplotlib.pyplot as plt
 
 class GlobalStage:
     """Repeated‑season (global‑time) dynamics around a *FastSIRVCore* kernel."""
 
-    # ────────────────────────────────────────────────────────────────────
     # construction
-    # ────────────────────────────────────────────────────────────────────
     def __init__(
         self,
         sirv,                   # FastSIRVcore
@@ -19,8 +18,8 @@ class GlobalStage:
         Dr: float = -1.0,
         Dg: float = -1.0,
         kappa: float = 0.1,
-        theta: float = 0.5,      # ### [MODIFIED] Now acts as baseline theta_0
-        alpha: float = 0.5,      # ### [NEW] Sensitivity to disease prevalence (I_t)
+        theta: float = 0.5,      # acts as baseline theta_0
+        alpha: float = 0.5,      # sensitivity to disease prevalence (I_t)
         epsilon: float = 0.01,   # initial infected fraction
         x0: float = 0.5,         # initial vaccination
         n0: float = 0.5,         # initial social norm
@@ -39,8 +38,8 @@ class GlobalStage:
         # global parameters
         self.C, self.Dr, self.Dg = C, Dr, Dg
         self.kappa = kappa
-        self.theta_0 = theta     # ### [MODIFIED] Store as baseline theta_0
-        self.alpha = alpha       # ### [NEW] Store prevalence sensitivity
+        self.theta_0 = theta     # store as baseline theta_0
+        self.alpha = alpha       # store prevalence sensitivity
         self.epsilon = epsilon
         
         # mutable global state
@@ -52,7 +51,7 @@ class GlobalStage:
         # storage – in the same shape you used before
         self.x_seq: List[float] = [x0]
         self.n_seq: List[float] = [n0]
-        self.theta_seq: List[float] = []  # ### [NEW] Track dynamic theta
+        self.theta_seq: List[float] = []    # Track dynamic theta
         self.payoff_C_seq: List[float] = []
         self.payoff_D_seq: List[float] = []
         self.HV_seq:   List[float] = []
@@ -62,9 +61,7 @@ class GlobalStage:
         self.epi_size_seq: List[float] = []
         self.it_seq: List[List[dict]] = []  # if requested
 
-    # ────────────────────────────────────────────────────────────────────
     # public API
-    # ────────────────────────────────────────────────────────────────────
     def run(self, *, return_equi: bool = False):
         """Run season by season until `max_seasons` or equilibrium."""
         print(self.x, self.n, self.C, self.local_params["eta"], self.local_params["beta"], self.local_params["gamma"])
@@ -76,7 +73,7 @@ class GlobalStage:
             if self._at_equilibrium():
                 break
 
-        # --- prepare outputs --------------------------------------
+        # prepare outputs
         if return_equi:
             last_pc = self.payoff_C_seq[-1]
             last_pd = self.payoff_D_seq[-1]
@@ -96,12 +93,10 @@ class GlobalStage:
             np.asarray(self.FFR_seq),
             np.asarray(self.epi_size_seq),
             self.it_seq if self.keep_iter else [],
-            np.asarray(self.theta_seq)  # ### [NEW] optionally return theta history
+            np.asarray(self.theta_seq)  # optionally return theta history
         )
 
-    # ────────────────────────────────────────────────────────────────────
     # internal helpers
-    # ────────────────────────────────────────────────────────────────────
     def _single_season(self) -> List[dict]:
         """Run Fast‑SIRV until local equilibrium, then update *(x, n)*."""
         # 1) initialise grid for this season
@@ -134,12 +129,12 @@ class GlobalStage:
         pd2c = 1 / (1 + np.exp(-(payoff_C - payoff_D) / self.kappa))
         pc2d = 1 / (1 + np.exp(-(payoff_D - payoff_C) / self.kappa))
 
-        # ### [NEW] Calculate dynamic theta_t based on epidemic size and vaccine effectiveness
+        # Calculate dynamic theta_t based on epidemic size and vaccine effectiveness
         # Formula: theta_t = theta_0 * (1 + alpha * I_t) * eta
         current_theta = self.theta_0 * (1 + self.alpha * epi_size) * self.local_params["eta"]
 
         self.x += self.x * (1 - self.x) * (pd2c - pc2d) / 20.0
-        # ### [MODIFIED] Use current_theta instead of self.theta
+        # Use current_theta instead of self.theta
         self.n += self.n * (1 - self.n) * (-1 + (1 + current_theta) * self.x) / 20.0 
         
         self.x = float(np.clip(self.x, 1e-5, 0.99999))
@@ -148,7 +143,7 @@ class GlobalStage:
         # 4) store history
         self.x_seq.append(self.x)
         self.n_seq.append(self.n)
-        self.theta_seq.append(current_theta)  # ### [NEW] Store current theta
+        self.theta_seq.append(current_theta)  # Store current theta
         self.payoff_C_seq.append(payoff_C)
         self.payoff_D_seq.append(payoff_D)
         self.epi_size_seq.append(epi_size)
@@ -160,7 +155,7 @@ class GlobalStage:
             return False
         dx = abs(self.x_seq[-1] - self.x_seq[-2])
         dn = abs(self.n_seq[-1] - self.n_seq[-2])
-        # ### [NOTE] You can also add a check for dtheta if needed, 
+        # can also add a check for dtheta if needed, 
         # but dx and dn are usually sufficient to determine eco-evolutionary equilibrium.
         return dx < tol and dn < tol
 
@@ -180,21 +175,20 @@ class GlobalStage:
         return np.asarray(self.epi_size_seq)
         
     @property
-    def theta_sequence(self):       # ### [NEW] Getter for theta
+    def theta_sequence(self):
         return np.asarray(self.theta_seq)
 
     # simple trend plot
     def plot_trend(self, *, show=True, savefile: str | None = None):
-        import matplotlib.pyplot as plt
         fig, ax = plt.subplots(figsize=(6, 4))
         ax.plot(self.x_seq, label="x (vaccinated)", color="blue")
         ax.plot(self.n_seq, label="n (norm)", color="green")
         
-        # ### [NEW] Add theta to the plot on a secondary y-axis to observe its dynamics
+        # Add theta to the plot on a secondary y-axis to observe its dynamics
         ax2 = ax.twinx()
         # Since theta_seq is updated at the END of season 0, its length is len(x_seq)-1.
         # We can pad it with the initial theta to match lengths for plotting.
-        initial_theta = self.theta_0 * (1 + self.alpha * 0) * self.local_params["eta"] # Approximate initial
+        initial_theta = self.theta_0 * (1 + self.alpha * 0) * self.local_params["eta"]
         full_theta_seq = [initial_theta] + self.theta_seq
         ax2.plot(full_theta_seq, label="θ (enhancement)", color="red", linestyle="--", alpha=0.5)
         ax2.set_ylabel("θ value")

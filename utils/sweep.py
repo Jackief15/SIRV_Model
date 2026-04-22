@@ -1,4 +1,3 @@
-# sweep.py ──────────────────────────────────────────────────────────
 import itertools, os, sys, traceback
 from typing import Sequence, Tuple, List, Iterable
 
@@ -8,14 +7,17 @@ import networkx as nx
 from joblib import Parallel, delayed
 
 from utils.FastSIRV import FastSIRV
-# from utils.Gloabl_stage import GlobalStage
 from utils.newGlobalStage import GlobalStage
 
 
-# key: (M, N) → (indptr, indices)
+# Cache for CSR format: key (M, N) → (indptr, indices)
 _CSR_CACHE: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
 
 def get_sirv_core(M: int = 100, N: int = 100) -> FastSIRV:
+    """
+    Returns an instance of FastSIRV for a grid graph. 
+    Uses a cache to avoid redundant graph generation and CSR conversion.
+    """
     key = (M, N)
     if key not in _CSR_CACHE:
         G   = nx.grid_2d_graph(M, N)
@@ -26,7 +28,7 @@ def get_sirv_core(M: int = 100, N: int = 100) -> FastSIRV:
     return FastSIRV(indptr, indices)
 
 
-# 2) ────────── 單一組 (C,η,β,γ,θ) 的處理函式 ────────────────────
+# Processing Function for Single Parameter Set
 def _process_one(
     C: float, eta: float, beta: float, gamma: float, 
     theta: float = 0.5, 
@@ -35,19 +37,23 @@ def _process_one(
     epsilon: float = 0.01,
     x0 = 0.5, n0 = 0.5
 ) -> List[float]:
+    """
+    Simulates the vaccination dynamics for a single set of parameters (C, η, β, γ, θ).
+    """
     try:
         sirv = get_sirv_core(M, N)
         gst  = GlobalStage(
             sirv,
             C=C, eta=eta, beta=beta, gamma=gamma,
-            theta=theta,                     # ← 可變參數
-            alpha=0,                       # Robustness check
+            theta=theta,
+            alpha=0,                   # Robustness check parameter
             epsilon=epsilon,
             Dr=Dr, Dg=Dg,
             x0=x0, n0=n0,
             max_seasons=2000,
             keep_iterations=False,
         )
+        # Obtain equilibrium states: fraction vaccinated, cognitive environment, payoffs, and epidemic size
         x_eq, n_eq, pC, pD, epi = gst.run(return_equi=True)
         return [x_eq, n_eq, pC, pD, epi, C, eta, beta, gamma, theta, x0, n0]
 
@@ -58,7 +64,7 @@ def _process_one(
         return [np.nan]*5 + [C, eta, beta, gamma, theta]
 
 
-# 3) ─────────── 外部呼叫的高階函式 ────────────────────────────────
+# High-level Functions for Large-scale Sweeps
 def run_sweep(
     theta_values: Sequence[float],
     Dr: float = -1,
@@ -71,16 +77,17 @@ def run_sweep(
     n_jobs: int | None = None,
     outfile: str | None = None
 ) -> pd.DataFrame:
-    """平行掃描 10 000 個 (C,η,β,γ) × |θ|。
+    """
+    Performs a parallel parameter sweep over (C, η, β, γ) combinations crossed with θ.
 
     Parameters
     ----------
-    theta_values : iterable of theta you want to test, e.g. [0.1, 0.2, 0.3]
-    grid_step    : step size for C,η,β,γ (default 0.1 → 0.1..1.0)
-    n_jobs       : how many worker processes (default = cores-1)
-    outfile      : csv path to save; if None, just return DataFrame
+    theta_values : iterable of theta to test, e.g., [0.1, 0.2, 0.3]
+    grid_step    : step size for C, η, β, γ (default 0.1 generates a 10^4 grid)
+    n_jobs       : number of worker processes (defaults to CPU cores - 1)
+    outfile      : path to save the resulting CSV; returns DataFrame if None
     """
-    # param grid for C,η,β,γ
+    # Construct parameter grid for (C, η, β, γ)
     vals = np.arange(grid_step, 1.0 + 1e-8, grid_step)
     base_grid = list(itertools.product(vals, vals, vals, vals))
 
@@ -90,7 +97,7 @@ def run_sweep(
         for th in theta_values
     ]
 
-    # parallel settings
+    # Parallel execution settings
     if n_jobs is None:
         n_jobs = max(1, os.cpu_count() - 1)
     os.environ['OMP_NUM_THREADS'] = '1'
@@ -110,6 +117,7 @@ def run_sweep(
         'C', 'eta', 'beta', 'gamma', 'theta', 'x0', 'n0'
     ])
 
+    # Classify the Game Type based on Dilemma Strength (Dr, Dg)
     df['L'] = M
     df['Dr'] = Dr
     df['Dg'] = Dg
@@ -143,7 +151,9 @@ def run_init_sweep(
     init_step: float = 0.1,
     n_jobs: int | None = None
 ) -> pd.DataFrame:
-    """掃 (x0, n0)×θ；其他參數固定。"""
+    """
+    Sweep over initial conditions (x0, n0) across various θ values while keeping other parameters fixed.
+    """
     vals = np.arange(init_step, 1.0 + 1e-8, init_step)
     init_grid = list(itertools.product(vals, vals))
 
@@ -181,41 +191,38 @@ def run_init_sweep(
 
     return df
 
-# ──────────────────────────────────────────────────────────────
 def run_sweep_flex(
     theta_values      : Sequence[float],
     *,
-    # ── 可選：直接給 param_grid ─────────────────────────────
+    # -- Optional: Direct provision of param_grid ------------------
     param_grid        : Iterable[Tuple[float,float,float,float]] | None = None,
-    # ── 或逐參數指定 ────────────────────────────────────
+    # -- Or specify values per-parameter ---------------------------
     C_vals            : Iterable[float] | None = None,
     eta_vals          : Iterable[float] | None = None,
     beta_vals         : Iterable[float] | None = None,
     gamma_vals        : Iterable[float] | None = None,
-    # ── 共用超參數 ────────────────────────────────────
+    # -- Shared hyperparameters ------------------------------------
     Dr: float = 0.5,
     Dg: float = 0.5,
     M : int   = 100,
     N : int   = 100,
     epsilon: float = 0.001,
-    # ── 備用：若上述都沒給，才用 grid_step ───────────────
+    # -- Fallback: grid_step used only if the above are omitted ---
     grid_step: float = 0.1,
-    # ── 併行設定與輸出 ─────────────────────────────────
+    # -- Parallel settings and output ------------------------------
     n_jobs : int | None = None,
     outfile: str | None = None,
 ) -> pd.DataFrame:
     """
     Flexible parameter sweep over (C, η, β, γ) × θ.
 
-    優先順序：
-      1. param_grid 若非 None → 直接使用
-      2. 否則檢查各 *_vals，未指定者以 grid_step 補足
-      3. 都沒指定 → 四參數均用 grid_step 等距掃描
-
-    其餘引數沿用舊版 run_sweep 行為。
+    Precedence Order:
+      1. If param_grid is provided -> used directly.
+      2. Otherwise, check individual *_vals; missing ones are filled using grid_step.
+      3. If no specific values are provided -> all four parameters are swept using grid_step.
     """
 
-    # ---------- 1. 構造 base_grid ----------------------------------
+    # ---------- Construct base_grid ----------------------------
     if param_grid is not None:
         base_grid = list(param_grid)
     else:
@@ -229,14 +236,14 @@ def run_sweep_flex(
 
         base_grid = list(itertools.product(C_vals, eta_vals, beta_vals, gamma_vals))
 
-    # ---------- 2. 組合所有任務 -----------------------------------
+    # ---------- Assemble all tasks -----------------------------
     tasks = [
         (C, eta, beta, gamma, th, Dr, Dg, M, N, epsilon)
         for (C, eta, beta, gamma) in base_grid
         for th                    in theta_values
     ]
 
-    # ---------- 3. 設定併行 ---------------------------------------
+    # ---------- Execute Parallel Processing --------------------
     if n_jobs is None:
         n_jobs = max(1, os.cpu_count() - 1)
     os.environ['OMP_NUM_THREADS'] = '1'

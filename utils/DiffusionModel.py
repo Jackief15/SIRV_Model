@@ -197,6 +197,7 @@ class DiffusionModel(object):
             self.params["nodes"][param] = node_to_value
 
         edges_cfg = configuration.get_edges_configuration()
+        
         # Set additional edges information
         for param, edge_to_values in future.utils.iteritems(edges_cfg):
             if len(edge_to_values) == len(self.graph.edges):
@@ -236,20 +237,15 @@ class DiffusionModel(object):
                     number_of_initial_infected = 1
 
                 available_nodes = [n for n in self.status if self.status[n] == 0]
-                # 1010: np.random.choice 只能用在 1-d array 上
                 sampled_nodes = sample(available_nodes, int(number_of_initial_infected))
-                # sampled_nodes = np.random.choice(
-                #     available_nodes, int(number_of_initial_infected), replace=False
-                # )
+
                 for k in sampled_nodes:
                     self.status[k] = self.available_statuses["Infected"]
 
-        # ====================
         # Set vaccinated nodes
-        # ====================
         if "fraction_vaccinated" in self.params["model"]:
 
-            # 0814: 如果 fraction_vaccinated + fraction_infected > 1，則 fraction_infected 優先，剩下的節點才設為 vaccinated
+            # If fraction_vaccinated + fraction_infected > 1, then the priority is fraction_infected, with the rest being vaccinated
             if self.params["model"]["fraction_infected"] + self.params["model"]["fraction_vaccinated"] >= 1:
                 number_of_initial_vaccinated = self.graph.number_of_nodes() - number_of_initial_infected
             else:
@@ -264,11 +260,7 @@ class DiffusionModel(object):
                     number_of_initial_vaccinated = 1
             
             available_nodes = [n for n in self.status if self.status[n] == 0]
-            # 1010: np.random.choice 只能用在 1-d array 上
             sampled_nodes = sample(available_nodes, int(number_of_initial_vaccinated))
-            # sampled_nodes = np.random.choice(
-            #     available_nodes, int(number_of_initial_vaccinated), replace=False
-            # )
             for k in sampled_nodes:
                 self.status[k] = self.available_statuses["Vaccinated"]
 
@@ -345,11 +337,7 @@ class DiffusionModel(object):
                     self.params["model"]["fraction_infected"]
                 )
                 available_nodes = [n for n in self.status if self.status[n] == 0]
-                # 1010: np.random.choice 只能用在 1-d array 上
                 sampled_nodes = sample(available_nodes, int(number_of_initial_infected))
-                # sampled_nodes = np.random.choice(
-                #     available_nodes, int(number_of_initial_infected), replace=False
-                # )
 
                 for k in sampled_nodes:
                     self.status[k] = self.available_statuses["Infected"]
@@ -358,9 +346,7 @@ class DiffusionModel(object):
             else:
                 self.status = self.initial_status
 
-            # ====================
             # Set vaccinated nodes
-            # ====================
             if "fraction_vaccinated" in self.params["model"]:
                 number_of_initial_vaccinated = self.graph.number_of_nodes() * float(
                     self.params["model"]["fraction_vaccinated"]
@@ -373,11 +359,7 @@ class DiffusionModel(object):
                     number_of_initial_vaccinated = 1
                 
                 available_nodes = [n for n in self.status if self.status[n] == 0]
-                # 1010: np.random.choice 只能用在 1-d array 上
                 sampled_nodes = sample(available_nodes, int(number_of_initial_vaccinated))
-                # sampled_nodes = np.random.choice(
-                #     available_nodes, int(number_of_initial_vaccinated), replace=False
-                # )
                 for k in sampled_nodes:
                     self.status[k] = self.available_statuses["Vaccinated"]
 
